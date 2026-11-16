@@ -82,7 +82,7 @@ details>summary{list-style:none}details>summary::-webkit-details-marker{display:
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script></head><body>
-<main id="v"></main><input type="file" accept="image/*" id="pf" hidden><input type="file" accept="image/*" multiple id="sf" hidden><div id="t"></div>
+<main id="v"></main><input type="file" accept="image/*" id="pf" hidden><div id="t"></div>
 <script>
 if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 addEventListener("beforeinstallprompt",e=>{e.preventDefault();window.dip=e;if(S.ok&&S.tab=="m"&&S.sub=="set")sr()});addEventListener("appinstalled",()=>{window.dip=null;if(S.ok)render()});
@@ -112,7 +112,7 @@ const ensR=async()=>{const a=[S.cfg.start||S.date,S.stok.start||S.date,dd(7,S.da
 const mut=(k,y,f)=>{const r=FS.doc(k+"/"+y);return FS.runTransaction(async t=>{const x=await t.get(r),a=x.exists?JSON.parse(x.data()[COL[k]]):[];f(a);t.set(r,{[COL[k]]:JSON.stringify(a)});return a})};
 async function run(f,ok){S.msg="";try{await f();if(ok)T(ok)}catch(e){S.msg=(e&&(e.message||e.code))||"Gagal, coba lagi."}render()}
 const fut=()=>S.date>loc();
-const go=(t,s)=>{if(S.ed)cancelEd();S.scan=null;S.eb=null;S.calc=false;S.mn="";S.tab=t;S.sub=s||"";S.cart=false;S.seg=0;S.del="";S.msg="";render();scrollTo(0,0)};
+const go=(t,s)=>{if(S.ed)cancelEd();S.eb=null;S.calc=false;S.mn="";S.tab=t;S.sub=s||"";S.cart=false;S.seg=0;S.del="";S.msg="";render();scrollTo(0,0)};
 const setDate=v=>run(async()=>{if(!v)return;S.date=v;if(!fut())await ensR()});
 function setSeg(i){S.seg=i;S.del="";render()}
 const ordNo=o=>{const l=(S.sales[ym(o.d)]||[]).filter(x=>x.d==o.d);return o.d.slice(8)+"/"+o.d.slice(5,7)+"-P"+String(l.indexOf(o)+1).padStart(2,"0")};
@@ -126,67 +126,6 @@ function checks(){const O=all("sales"),B=all("buys"),K=all("kl"),sl=saldo(),t=lo
  return[["Penjualan tanpa metode bayar",O.filter(o=>!o.m).length],["Pembelian tanpa metode bayar",B.filter(r=>!r[1]).length],["Pembelian tanpa ’Untuk’ (La Ba’sa/Pribadi)",B.filter(r=>!r[2]).length],["Catatan kas lain belum lengkap",K.filter(r=>!klok(r)).length],["Akun dengan selisih uang fisik",A.filter(a=>sl[a].fz!==undefined&&sl[a].fz!==""&&+sl[a].fz!=sl[a].s).length],["Tanggal di masa depan (cek bulan/hari)",O.filter(o=>o.d>t).length+B.filter(r=>r[0]>t).length+K.filter(r=>r.d>t).length]]}
 const photo=(k,c,t)=>S.ph[k]?`<img src="${S.ph[k]}" alt="">`:t;
 const thumb=n=>`<div class="i${S.ph[slug(n)]?"":" l sf"}">${photo(slug(n),"",esc(n.trim()[0]||"?"))}</div>`;
-
-/* ===== Scan catatan dari foto ===== */
-IC.cam='<path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>';
-const AIM="claude-sonnet-5-5",akey=()=>localStorage.getItem("akey")||"",osum=o=>o.rows.reduce((a,r)=>a+r.q*r.p,0);
-function openScan(){S.scan={busy:"",orders:[],imgs:[],last:"",edk:false};S.msg="";render();scrollTo(0,0)}
-function closeScan(){S.scan=null;S.msg="";render()}
-const pickScan=()=>Q("#sf").click();
-function saveKey(){const v=Q("#ak").value.trim();if(!v){S.msg="Tempel kunci API dulu.";return render()}localStorage.setItem("akey",v);S.msg="";S.scan.edk=false;render();T("Kunci disimpan ✓")}
-Q("#sf").onchange=e=>{const fs=[...e.target.files];e.target.value="";if(fs.length)scanGo(fs)};
-async function readNote(du){
- const menu=S.menu.map(m=>m[0]).join(", ");
- const sys="Kamu membaca foto halaman buku catatan tulisan tangan sebuah warung makan. Isinya catatan pesanan pelanggan.\n"+
- "Format: tiap pesanan diawali nomor yang dilingkari, lalu satu item per baris. Jumlah bisa di depan nama (\"1 kebuli\") atau di belakang (\"Sayap 2\"). Di kanan ada total harga yang dilingkari, ditulis singkat (\"40k\" = 40000). Kalau ada tulisan \"TF\" dilingkari pada pesanan itu, berarti dibayar QRIS. Kalau tidak ada keterangan apa pun, berarti tunai. Di bagian atas halaman kadang ada tanggal (hari dd/mm/yyyy, format Indonesia).\n"+
- "Daftar menu yang valid: "+menu+".\n"+
- "Untuk setiap item, pilih nama menu yang paling cocok dari daftar itu (tulisan tangan sering singkat atau salah eja, mis. \"masi\" bisa jadi \"nasi\"). Kalau tidak ada yang cocok, isi menu null dan salin tulisan aslinya di \"tulis\". Jangan mengarang item atau angka yang tidak terbaca; pakai null. Abaikan logo, kop, dan teks cetak.\n"+
- "Balas hanya JSON tanpa penjelasan, bentuk: {\"tanggal\":\"YYYY-MM-DD\" atau null,\"pesanan\":[{\"no\":angka atau null,\"item\":[{\"tulis\":\"teks asli\",\"menu\":\"nama menu\" atau null,\"qty\":angka}],\"total\":angka rupiah atau null,\"bayar\":\"Tunai\" atau \"QRIS\"}]}";
- const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":akey(),"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-  body:JSON.stringify({model:AIM,max_tokens:2500,system:sys,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:du.split(",")[1]}},{type:"text",text:"Baca catatan ini. Balas hanya JSON."}]}]})});
- const j=await r.json().catch(()=>({}));
- if(!r.ok)throw{message:r.status==401?"Kunci API ditolak. Cek kembali kuncinya.":"Gagal membaca foto: "+((j.error&&j.error.message)||r.status)};
- const t=(j.content||[]).map(x=>x.text||"").join(""),a=t.indexOf("{"),b=t.lastIndexOf("}");
- try{return JSON.parse(t.slice(a,b+1))}catch(_){throw{message:"Hasil bacaan tidak bisa diproses, coba foto ulang."}}}
-async function scanGo(fs){const sc=S.scan;if(!sc)return;S.msg="";const parts=[];
- try{for(let i=0;i<fs.length;i++){sc.busy="Membaca foto "+(i+1)+" dari "+fs.length+"…";render();
-  const d=await cmp(fs[i],1600,.82),p=await readNote(d);sc.imgs.push(d);parts.push(p)}}
- catch(e){S.msg=(e&&e.message)||"Gagal membaca foto. Cek koneksi."}
- const ps=parts.map(p=>({tgl:/^\d{4}-\d\d-\d\d$/.test(p.tanggal||"")?p.tanggal:null,os:Array.isArray(p.pesanan)?p.pesanan:[]}));
- const mn=p=>Math.min(999,...p.os.map(o=>+o.no).filter(n=>n>=0));ps.sort((a,b)=>mn(a)-mn(b));
- let cur=sc.last||S.date,noD=0,n=0;
- ps.forEach(p=>{if(p.tgl)cur=p.tgl;else if(!sc.last&&!n)noD=1;p.os.forEach(o=>{const rows=(Array.isArray(o.item)?o.item:[]).map(x=>{const m=S.menu.find(y=>y[0].toLowerCase()==String(x.menu||"").toLowerCase());return{w:String(x.tulis||""),n:m?m[0]:"",q:Math.max(1,Math.round(+x.qty||1)),p:m?m[1]:0}});
-  if(!rows.length)return;sc.orders.push({no:o.no==null?null:+o.no,d:cur,m:o.bayar=="QRIS"?"QRIS":"Tunai",tot:o.total==null?null:+o.total,rows});n++})});
- sc.last=cur;sc.busy="";
- if(!S.msg&&!n)S.msg="Tidak ada pesanan yang terbaca di foto itu. Coba foto lebih dekat dan terang.";
- else if(!S.msg&&noD)S.msg="Tanggal tidak terbaca di foto, jadi dipakai tanggal yang sedang dipilih. Cek kolom tanggal tiap nota.";
- for(const o of sc.orders)ens(ym(o.d)).then(sr0,sr0);
- render();scrollTo(0,0)}
-const dupe=o=>{const sig=a=>a.map(r=>r[0]+"|"+r[1]).sort().join(",");return(S.sales[ym(o.d)]||[]).some(x=>x.d==o.d&&x.m==o.m&&tot(x)==osum(o)&&sig(x.i)==sig(o.rows.map(r=>[r.n,r.q])))};
-function scSet(i,k,v){const o=S.scan.orders[i];if(k=="d"){if(!v)return;o.d=v;ens(ym(v)).then(sr0,sr0)}else o[k]=v;sr0()}
-function scRow(i,j,k,v){const r=S.scan.orders[i].rows[j];if(k=="n"){r.n=v;const m=S.menu.find(x=>x[0]==v);if(m)r.p=m[1]}else r.p=Math.max(0,parseInt(v)||0);sr0()}
-function scQ(i,j,d){const r=S.scan.orders[i].rows[j];r.q=Math.max(1,r.q+d);sr0()}
-function scRm(i,j){const o=S.scan.orders[i];o.rows.splice(j,1);if(!o.rows.length)S.scan.orders.splice(i,1);sr0()}
-function scDel(i){S.scan.orders.splice(i,1);sr0()}
-function scSave(){const n=S.scan.orders.length;run(async()=>{const os=S.scan.orders;if(!os.length)throw{message:"Belum ada pesanan."};
- for(const o of os){const nm=o.no!=null?"nota #"+o.no:"pesanan";if(!o.d||o.d>loc())throw{message:"Cek tanggal "+nm+" (kosong atau belum terjadi)."};if(o.rows.some(r=>!r.n))throw{message:"Pilih menu untuk semua baris di "+nm+"."}}
- const by={};os.forEach((o,k)=>{const x={d:o.d,m:o.m,i:o.rows.map(r=>[r.n,r.q,r.p]),t:Date.now()+k};if(o.no!=null)x.c="Nota buku #"+o.no;(by[ym(o.d)]=by[ym(o.d)]||[]).push(x)});
- for(const y in by){await ens(y);S.sales[y]=await mut("sales",y,a=>a.push(...by[y]))}
- S.date=os[0].d;S.scan=null;S.tab="k";S.seg=1;S.cart=false},n+" pesanan tersimpan ✓")}
-function vScan(){const sc=S.scan,os=sc.orders,k=akey(),mnames=S.menu.map(m=>m[0]);let b=hdr("Scan catatan","closeScan()");
- if(sc.busy)return b+`<div class="card"><p style="margin:0">${esc(sc.busy)}</p><p class="mu sm" style="margin:6px 0 0">Tunggu sebentar, jangan tutup halaman.</p></div>`;
- if(!k||sc.edk)b+=`<div class="card"><div class="ct">Kunci API Anthropic</div><p class="mu sm" style="margin:0 0 8px">Dipakai untuk membaca tulisan tangan di foto. Disimpan hanya di HP ini. Sebaiknya pakai kunci khusus dengan batas pengeluaran.</p><input id="ak" type="password" autocomplete="off" placeholder="sk-ant-…"><button class="pb" onclick="saveKey()">Simpan kunci</button></div>`;
- if(!k)return b;
- if(!os.length)b+=`<div class="card"><p style="margin:0 0 6px">Foto halaman catatan pesanan (boleh beberapa sekaligus). Hasil bacaan dicek dulu sebelum disimpan.</p><p class="mu sm" style="margin:0">Tanpa keterangan = Tunai. Tulisan TF dilingkari = QRIS.</p><button class="pb" onclick="pickScan()">${I("cam")} Pilih foto</button>${sc.edk?"":`<button class="x1" style="margin-top:8px" onclick="S.scan.edk=true;render()">Ganti kunci API</button>`}</div>`;
- else{
-  if(sc.imgs.length)b+=`<details class="card"><summary class="ct" style="margin:0;cursor:pointer">Lihat foto (${sc.imgs.length})</summary><div style="height:8px"></div>${sc.imgs.map(d=>`<img src="${d}" alt="" style="width:100%;border-radius:12px;margin-bottom:8px">`).join("")}</details>`;
-  b+=os.map((o,i)=>{const s=osum(o),mis=o.tot!=null&&o.tot!==s;return`<div class="card"><div class="rw" style="padding-top:0"><div class="x"><b>${o.no!=null?"Nota #"+o.no:"Pesanan"}</b>${dupe(o)?'<small class="neg">⚠ Mungkin sudah tercatat</small>':""}</div><button class="x1" onclick="scDel(${i})">Buang</button></div>
-  <div class="g"><div><label class="f">Tanggal</label><input type="date" max="${loc()}" value="${o.d}" onchange="scSet(${i},'d',this.value)"></div><div><label class="f">Bayar</label><select onchange="scSet(${i},'m',this.value)">${sel(["Tunai","QRIS"],o.m)}</select></div></div>
-  ${o.rows.map((r,j)=>`<div style="padding:10px 0;border-bottom:1px solid var(--ln)"><select onchange="scRow(${i},${j},'n',this.value)"><option value="">Pilih menu…</option>${sel(mnames,r.n)}</select>${r.w&&r.w.toLowerCase()!=r.n.toLowerCase()?`<small class="mu">tertulis: ${esc(r.w)}</small>`:""}<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px"><div class="sp"><button onclick="scQ(${i},${j},-1)">−</button><span>${r.q}</span><button onclick="scQ(${i},${j},1)">+</button></div><button class="x1" onclick="scRm(${i},${j})">Hapus</button><input class="pr" type="number" inputmode="numeric" value="${r.p}" onchange="scRow(${i},${j},'p',this.value)"></div></div>`).join("")}
-  <div class="tot"><span>Total hitungan</span><b class="sf">${rp(s)}</b></div>${o.tot!=null?`<p class="sm ${mis?"neg":"mu"}" style="margin:6px 0 0">Total di catatan ${rp(o.tot)}${mis?" · selisih "+rp(s-o.tot)+". Cek menu atau harga.":" ✓"}</p>`:""}</div>`}).join("");
-  b+=`<button class="pb" style="background:var(--tint);color:var(--tx)" onclick="pickScan()">${I("cam")} Tambah foto</button><button class="pb" onclick="scSave()">Simpan ${os.length} pesanan →</button>`}
- return b}
-/* ===== akhir scan ===== */
 function pick(key,max,q){S.pk={key,max,q};const f=Q("#pf");f.value="";f.click()}
 Q("#pf").onchange=e=>{const f=e.target.files[0];if(!f)return;const{key,max,q}=S.pk;run(async()=>{const d=await cmp(f,max,q);await FS.doc("photos/"+key).set({d});S.ph[key]=d},"Foto disimpan ✓")};
 const cmp=(f,m,q)=>new Promise((ok,no)=>{const i=new Image,u=URL.createObjectURL(f);i.onload=()=>{const r=Math.min(1,m/Math.max(i.width,i.height)),c=document.createElement("canvas");c.width=Math.round(i.width*r);c.height=Math.round(i.height*r);c.getContext("2d").drawImage(i,0,0,c.width,c.height);URL.revokeObjectURL(u);ok(c.toDataURL("image/jpeg",q))};i.onerror=()=>no({message:"Foto tidak terbaca."});i.src=u});
@@ -214,8 +153,8 @@ const dl=(id,a)=>`<datalist id="${id}">${a.map(x=>`<option value="${esc(x)}">`).
 function render(){
   let h=S.msg?`<div class="m">${esc(S.msg)}</div>`:"";
  if(!HAS)h+=vC();else if(!S.u)h+=vL();else if(!S.ok)h+='<p class="mu">Memuat data…</p>';
- else{h+=S.scan?vScan():S.cart?vCart():({h:vH,k:vK,b:vB,w:vW,m:vM}[S.tab])();if(!S.cart&&!S.scan&&!(S.tab=="k"&&S.items.length==0&&0))h+=nav()}
- if(S.ok&&S.tab=="k"&&!S.cart&&!S.scan&&S.items.length)h+=cbar();
+ else{h+=S.cart?vCart():({h:vH,k:vK,b:vB,w:vW,m:vM}[S.tab])();if(!S.cart&&!(S.tab=="k"&&S.items.length==0&&0))h+=nav()}
+ if(S.ok&&S.tab=="k"&&!S.cart&&S.items.length)h+=cbar();
  if(S.calc)h+=calcHtml();Q("#v").innerHTML=h;Q("#v").onclick=e=>{if(S.mn&&!e.target.closest(".mw")){S.mn="";sr0()}};anim()}
 const nav=()=>`<nav class="nv">${[["h","Beranda"],["k","Kasir"],["b","Belanja"],["w","Kas"],["m","Lainnya"]].map(([k,l])=>`<button class="${S.tab==k?"on":""}" onclick="go('${k}')">${I(k)}${l}</button>`).join("")}</nav>`;
 const grt=()=>{const h=new Date().getHours();return h<11?"Selamat pagi,":h<15?"Selamat siang,":h<18?"Selamat sore,":"Selamat malam,"};
@@ -245,7 +184,7 @@ function tgm(id){S.mn=S.mn==id?"":id;S.del="";sr0()}
 function vK(){const od=all("sales").filter(o=>o.d==S.date);
  const lst=S.seg==0?`<div class="sc">${I("s")}<input placeholder="Cari menu…" value="${esc(S.q)}" oninput="S.q=this.value;Q('#ml').innerHTML=ml()"></div><div class="card" id="ml" style="padding:4px 14px">${ml()}</div>`
  :(od.length?[...od].reverse().map(o=>{const k=(S.sales[ym(o.d)]||[]).indexOf(o);return`<div class="card"><div class="rw" style="padding:0;border:0"><div class="x"><b>${ordNo(o)} · ${o.m}</b><small>${o.i.map(x=>esc(x[0])+" ×"+x[1]).join(", ")}${o.c?" · "+esc(o.c):""}</small></div><div class="a">${rp(tot(o))}</div>${mnu("o"+k,[["Edit",`startEdO('${o.d}',${k})`],["Hapus",`dO('${o.d}',${k})`,"o"+k]])}</div></div>`}).join("")+`<div class="card"><div class="tot" style="border:0;margin:0;padding:0"><span>Omzet ${fs(S.date)}</span><b class="sf">${rp(sm(od))}</b></div></div>`:'<p class="mu">Belum ada pesanan di tanggal ini.</p>');
- return`<div class="hd"><h1 class="sf" style="flex:1">Kasir</h1><button class="ic" onclick="openScan()" aria-label="Scan catatan dari foto">${I("cam")}</button></div>${dbar()}${segs(["Pesanan baru","Buku penjualan"])}${lst}`}
+ return`<div class="hd"><h1 class="sf" style="flex:1">Kasir</h1></div>${dbar()}${segs(["Pesanan baru","Buku penjualan"])}${lst}`}
 const ml=()=>{const q=S.q.toLowerCase(),r=S.menu.map((m,i)=>[m,i]).filter(([m])=>m[0].toLowerCase().includes(q));return r.length?r.map(([m,i])=>`<div class="rw mi">${thumb(m[0])}<div class="x"><b>${esc(m[0])}</b><small>${rp(m[1])}</small></div><button class="pl" onclick="add(${i})" aria-label="Tambah ${esc(m[0])}">+</button></div>`).join(""):'<p class="mu">Menu tidak ketemu.</p>'};
 const cbar=()=>{const n=S.items.reduce((a,c)=>a+c[1],0);return`<div class="cb"><div><span><small>${n} item</small><b>${rp(S.items.reduce((a,c)=>a+c[1]*c[2],0))}</b></span><button onclick="S.cart=true;render();scrollTo(0,0)">Lanjut →</button></div></div>`};
 function add(i){const m=S.menu[i],c=S.items.find(x=>x[0]==m[0]&&x[2]==m[1]);c?c[1]++:S.items.push([m[0],1,m[1]]);T(m[0]+" +1");sr0()}
