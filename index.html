@@ -256,7 +256,7 @@ function vH(){const y=ym(S.date),O=all("sales"),sl=saldo(),low=lowS(),hm=S.hm,sc
  <div class="hello"><div class="arch">${S.ph.banner?photo("banner"):WARUNG}<button onclick="pick('banner',900,.72)">Ganti foto</button></div><div class="t"><h2 class="sf">${grt()}</h2><div class="gn sf">${esc(S.name)}.</div><p class="sf">Semoga hari ini lancar.</p></div></div>
  ${dbar()}<div class="hero" id="hero" role="button" tabindex="0" aria-label="Ketuk untuk ganti tampilan penjualan atau pembelian" onclick="flip(event)" onkeydown="if(event.key=='Enter'||event.key==' '){event.preventDefault();flip()}"><div id="hc">${heroC(hm)}</div><svg viewBox="0 0 100 48" preserveAspectRatio="none"><polyline id="hp" points="${ptsS(hero(hm).pts)}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg><svg class="sw" viewBox="0 0 24 24">${IC.swap}</svg></div>
  <div class="qa">${[["b","Belanja","b"],["calc","Kalkulator","calc"],["stok","Stok","box"]].map(([t,l,i])=>`<button onclick="${t=="calc"?"openCalc()":t=="stok"?"go('m','stok')":`go('${t}')`}">${I(i)}${l}</button>`).join("")}</div>
- ${lrCard()}
+ ${szAlert()}${lrCard()}
  ${low.length?`<div class="card" onclick="go('m','stok')" style="cursor:pointer"><div class="rw" style="padding:0"><div class="i">${I("warn")}</div><div class="x"><b>Stok menipis</b><small>${low.length} barang perlu restok</small></div><span class="mu">›</span></div></div>`:""}
  <div id="rs">${sumH(hm)}</div>
  <div class="h3"><b class="sf">Saldo uang</b><a onclick="go('w')">Lihat kas →</a></div><div class="card">${AV.map(a=>bar(a,rp(sl[a].s),"w")).join("")}<div class="tot"><span>Total saldo</span><b class="sf">${rp(AV.reduce((a,x)=>a+sl[x].s,0))}</b></div></div>
@@ -537,7 +537,25 @@ function dN(k){const y=ym(S.date);if(S.del!="n"+k){S.del="n"+k;return render()}S
 const ROL=[["","Belum terdaftar"],["viewer","Viewer"],["staff","Staff"],["admin","Admin"],["owner","Owner"],["off","Nonaktif"]];
 const agtV=m=>m.active===false?"off":(m.role||"");
 const agtCard=()=>`<div class="card"><div class="ct">Anggota &amp; peran</div>${S.mem?`<p class="mu sm" style="margin:0 0 4px">Viewer: lihat saja · Staff: catat transaksi · Admin: + ubah menu, harga, stok · Owner: semua.</p>${S.mem.map(m=>`<div class="rw" style="gap:10px;align-items:center"><div class="x" style="min-width:0;flex:1"><b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.name||(m.email||m.id).split("@")[0])}</b><small class="mu" style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.email||"")}</small></div><select style="flex:none;width:122px;min-width:0;height:44px;padding:0 8px;font-size:14px" onchange="setRole('${m.id}',this.value)">${ROL.map(([v,l])=>`<option value="${v}"${agtV(m)==v?" selected":""}>${l}</option>`).join("")}</select></div>`).join("")}`:`<p class="mu sm" style="margin:0 0 8px">Atur siapa boleh melihat atau mencatat. Akun baru muncul di sini setelah login sekali.</p><button class="pb" style="margin:0" onclick="loadMem()">Tampilkan anggota</button>`}</div>`;
-const szCard=()=>{let mx=0;["sales","buys","kl","kn","sk"].forEach(k=>Object.values(S[k]).forEach(a=>{const n=JSON.stringify(a).length;if(n>mx)mx=n}));const p=Math.round(mx/10485.76);return`<div class="card"><div class="ct">Ukuran data</div><p class="mu sm" style="margin:0">Dokumen bulanan terbesar: ${Math.round(mx/1024)} KB (${p}% dari batas Firestore ±1 MB).${p>=60?" <b>Mendekati batas, hubungi pembuat aplikasi.</b>":" Masih aman."}</p></div>`};
+const SZ_LIM=1048576,SZ_C=new WeakMap(),SZ_LAB={sales:"Penjualan",buys:"Belanja",kl:"Kas lain",kn:"Konsumsi keluarga",sk:"Penyesuaian stok"};
+const szBytes=(o,cache)=>{try{if(cache&&o&&typeof o=="object"){const h=SZ_C.get(o),len=Array.isArray(o)?o.length:-1;if(h&&h.len===len)return h.b;const t=JSON.stringify(o),b=window.TextEncoder?new TextEncoder().encode(t).length:t.length;SZ_C.set(o,{len,b});return b}const t=JSON.stringify(o)||"";return window.TextEncoder?new TextEncoder().encode(t).length:t.length}catch(e){return 0}};
+const szKB=b=>Math.round(b/1024).toLocaleString("id-ID")+" KB";
+function szStats(){const rows=[];
+ ["sales","buys","kl","kn","sk"].forEach(k=>Object.entries(S[k]||{}).forEach(([y,a])=>{if(!Array.isArray(a))return;const b=szBytes(a,true);rows.push({k,y,n:(SZ_LAB[k]||k)+" "+y,b,p:b/SZ_LIM*100,cnt:a.length})}));
+ if(S.stok&&typeof S.stok=="object"){const b=szBytes(S.stok,false);rows.push({k:"stok",y:"",n:"Resep, bahan & stok",b,p:b/SZ_LIM*100,cnt:0})}
+ rows.sort((a,b)=>b.b-a.b);
+ const top=rows[0]||null,mx=top?top.p:0;
+ let proj=null;const cm=ym(loc()),sd=rows.find(r=>r.k=="sales"&&r.y==cm),day=+loc().slice(8);
+ if(sd&&day>=3&&sd.b>0){const[yy,mm]=cm.split("-").map(Number),dim=new Date(yy,mm,0).getDate(),rate=sd.b/day,end=rate*dim;proj={end,over:end>=SZ_LIM,full:Math.floor(SZ_LIM/rate),dim,cnt:sd.cnt}}
+ return{rows,top,mx,proj}}
+const szLv=p=>p>=90?"Kritis":p>=70?"Mendekati batas":p>=50?"Perlu dipantau":"Aman";
+const szCard=()=>{const T=szStats(),mx=T.mx,lv=szLv(mx);
+ const bar=p=>`<div class="szb"><i class="${p>=70?"w":""}" style="width:${Math.max(1,Math.min(100,p)).toFixed(1)}%"></i></div>`;
+ const list=T.rows.slice(0,4).map(r=>`<div class="szr${r.p>=70?" hi":""}"><div class="l"><span>${esc(r.n)}</span><span>${szKB(r.b)} · ${Math.round(r.p)}%</span></div>${bar(r.p)}</div>`).join("");
+ const pj=T.proj?`<p class="mu sm" style="margin:10px 0 0">Proyeksi dokumen penjualan bulan ini: ±${szKB(T.proj.end)} di akhir bulan${T.proj.over?`. <b>Dengan laju sekarang penuh sekitar tanggal ${Math.max(T.proj.full,1)}.</b>`:"."}</p>`:"";
+ const msg=mx>=90?"<b>Kritis.</b> Dokumen yang penuh membuat nota baru gagal disimpan. Segera tangani sebelum mencatat lagi.":mx>=70?"<b>Mendekati batas.</b> Segera tangani sebelum bulan berganti, karena dokumen yang penuh membuat nota baru gagal disimpan.":mx>=50?"Sudah lebih dari setengah batas. Pantau tiap beberapa hari.":"Masih aman.";
+ return`<div class="card"><div class="ct">Ukuran data</div><div class="rw" style="padding:0 0 6px;border:0;min-height:0"><div class="x"><b class="sf" style="font-size:26px">${T.top?Math.round(mx)+"%":"–"}</b><small>dokumen terbesar dari batas Firestore (±1 MB)</small></div><span class="pill">${lv}</span></div>${T.top?list:""}${pj}<p class="mu sm" style="margin:10px 0 0">${msg}</p><p class="mu sm" style="margin:6px 0 0;font-size:11.5px">Perkiraan dari data yang sudah dimuat di aplikasi ini. Hanya bulan yang sudah dibuka yang terhitung.</p></div>`};
+const szAlert=()=>{try{if(!isOwn())return"";const T=szStats();if(T.mx<70&&!(T.proj&&T.proj.over&&T.mx>=40))return"";const crit=T.mx>=90;const txt=T.mx>=70?`Dokumen <b>${esc(T.top.n)}</b> sudah ${Math.round(T.mx)}% dari batas Firestore. ${crit?"Kritis: nota baru bisa gagal tersimpan.":"Segera tangani sebelum penuh."}`:`Dokumen penjualan bulan ini diproyeksikan penuh sekitar tanggal ${Math.max(T.proj.full,1)}.`;return`<div class="wn" role="button" tabindex="0" style="cursor:pointer" onclick="go('m','set')" onkeydown="if(event.key=='Enter'){go('m','set')}"><span>${I("warn","width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;flex:none")}</span><span>${txt} Ketuk untuk detail.</span></div>`}catch(e){return""}};
 async function loadMem0(){const[u,m]=await Promise.all([FS.collection("users").get(),FS.collection("members").get()]),mm={};m.forEach(d=>mm[d.id]=d.data());S.mem=u.docs.map(d=>({id:d.id,...d.data(),role:(mm[d.id]||{}).role,active:(mm[d.id]||{}).active}))}
 const loadMem=()=>run(loadMem0);
 const setRole=(id,v)=>run(async()=>{if(!v)return;if(id==S.u.uid&&v!="owner")throw{message:"Peran dirimu sendiri tidak bisa diturunkan dari sini."};await aud("peran",{uid:id,ke:v});await FS.doc("members/"+id).set({role:v=="off"?"viewer":v,active:v!="off"});await loadMem0()},"Peran disimpan ✓");
@@ -749,6 +767,13 @@ button:active{transform:scale(.97)}
 .mi .pl:active,.sp button:active{transform:scale(.9)}
 .cb button{min-height:48px}.cb b{font-size:20px;letter-spacing:-.01em}
 main .card:has(input[placeholder^="Cari menu"]){position:sticky;top:calc(env(safe-area-inset-top,0px) + 6px);z-index:15;box-shadow:var(--sh-2)}
+/* indikator ukuran dokumen Firestore */
+.szb{height:8px;border-radius:6px;background:var(--tint);overflow:hidden;margin:6px 0 2px}
+.szb i{display:block;height:100%;border-radius:6px;background:var(--ok);transform-origin:left;animation:grow .7s var(--ease) backwards}
+.szb i.w{background:var(--ac)}
+.szr{padding:8px 0;border-bottom:1px solid var(--ln)}.szr:last-of-type{border:0}
+.szr .l{display:flex;justify-content:space-between;gap:10px;font-size:13.5px}.szr .l span:last-child{white-space:nowrap;font-weight:600}
+.szr.hi .l span:last-child{color:var(--ac)}
 </style>
 <script>
 /* ===== UPGRADE v3: UX ringan & aman (tidak menyentuh data/logika) ===== */
