@@ -601,18 +601,24 @@ const vC=()=>`<div class="hd" style="margin-top:30px"><h1 class="sf">Sambungkan<
 function saveCfg(){const t=Q("#cf").value,g=k=>(t.match(new RegExp(k+"\\s*[:=]\\s*[\"']([^\"']+)[\"']"))||[])[1],c={apiKey:g("apiKey"),authDomain:g("authDomain"),projectId:g("projectId"),appId:g("appId")};if(!c.apiKey||!c.projectId){S.msg="Kode belum lengkap. Pastikan apiKey dan projectId ikut tertempel.";return render()}localStorage.setItem("cfg",JSON.stringify(c));location.reload()}
 const vL=()=>`<div style="margin-top:34px"><div class="ic" style="margin-bottom:14px">${I("w")}</div><h1 class="sf" style="font-size:40px;margin:0">La Ba’sa</h1><p class="mu sf" style="font-style:italic;margin:2px 0 14px">Pembukuan warung</p></div><div class="card"><label class="f">Email</label><input id="le" type="email" autocomplete="username"><label class="f">Kata sandi</label><input id="lw" type="password" autocomplete="current-password"><button class="pb" onclick="login()">Masuk →</button></div>`;
 const login=()=>run(async()=>{try{await AU.signInWithEmailAndPassword(Q("#le").value.trim(),Q("#lw").value)}catch(e){throw{message:"Email atau kata sandi salah."}}});
-/* ===== SEED RESEP AYAM LA-BA'SA =====
-   Menambahkan/memperbarui hanya empat varian ayam dan resep HPP-nya.
-   Aman dijalankan berulang: tidak menggandakan menu, bahan, atau resep.
+/* ===== SEED RESEP AYAM LA-BA'SA: 3 JENIS POTONGAN =====
+   Katalog hanya menampilkan Sayap, Paha, dan Dada di kategori Lauk La-Ba'sa.
+   Resep memakai satu batch 1 ekor ayam (13 potong), biaya dibagi rata.
+   Aman dijalankan berulang dan tidak mengubah riwayat transaksi.
 */
 async function seedAyamLabasa(){
  if(!FS||!['owner','admin'].includes(S.role))return;
- const variants=[['Ayam Sayap',15000],['Ayam Paha Bawah',20000],['Ayam Paha Atas',20000],['Ayam Dada',25000]];
+ const variants=[['Sayap',15000],['Paha',20000],['Dada',25000]];
+ const legacyNames=["Sayap La Ba'sa","Paha La Ba'sa","Dada La Ba'sa",'Ayam Sayap','Ayam Paha Bawah','Ayam Paha Atas','Ayam Dada',"Ayam La-Ba'sa"];
+ const canonicalNames=variants.map(x=>x[0]);
  const menuRef=FS.doc('app/menu');
  const menuData=await FS.runTransaction(async tx=>{
   const snap=await tx.get(menuRef),d=snap.exists?snap.data():{items:'[]',categories:'{}',menuIds:'{}'};
-  const items=JSON.parse(d.items||'[]'),cats=JSON.parse(d.categories||'{}'),ids=JSON.parse(d.menuIds||'{}');
-  variants.forEach(([name,price])=>{const i=items.findIndex(x=>String(x[0]).toLowerCase()===name.toLowerCase());if(i>=0)items[i]=[name,price];else items.push([name,price]);cats[name]="Lauk La-Ba'sa";ids[name]=ids[name]||menuKey(name)});
+  let items=JSON.parse(d.items||'[]'),cats=JSON.parse(d.categories||'{}'),ids=JSON.parse(d.menuIds||'{}');
+  const isLegacy=n=>legacyNames.some(x=>String(n).toLowerCase()===x.toLowerCase());
+  items=items.filter(x=>!isLegacy(x[0])&&!canonicalNames.some(n=>n.toLowerCase()===String(x[0]).toLowerCase()));
+  legacyNames.forEach(n=>{delete cats[n];delete ids[n]});
+  variants.forEach(([name,price])=>{items.push([name,price]);cats[name]="Lauk La-Ba'sa";ids[name]=ids[name]||menuKey(name)});
   tx.set(menuRef,{items:JSON.stringify(items),categories:JSON.stringify(cats),menuIds:JSON.stringify(ids)});
   return{items,cats,ids};
  });
@@ -624,7 +630,6 @@ async function seedAyamLabasa(){
   {key:'terigu_labasa',name:'Tepung terigu',purchaseUnit:'kg',baseUnit:'kg',manualCost:13000},
   {key:'minyak_goreng_labasa',name:'Minyak goreng',purchaseUnit:'l',baseUnit:'l',manualCost:29000}
  ];
- const stokRef=FS.doc('stok/cfg');
  const stok=await updateJsonDoc('stok/cfg','data',{start:'',items:[],ingredients:[],recipes:{},recipeHistory:{},priceHistory:{},hppMenus:[]},c=>{
   c.items=c.items||[];c.ingredients=c.ingredients||[];c.recipes=c.recipes||{};c.recipeHistory=c.recipeHistory||{};c.priceHistory=c.priceHistory||{};
   const ids={};
@@ -641,15 +646,18 @@ async function seedAyamLabasa(){
    {ingredientId:ids.terigu_labasa,qty:1,unit:'kg'},
    {ingredientId:ids.minyak_goreng_labasa,qty:1,unit:'l'}
   ];
+  const oldNames=[...legacyNames];
+  oldNames.forEach(n=>{const oldKey=recipeKey(n);if(c.recipes[oldKey]){c.recipeHistory[oldKey]=c.recipeHistory[oldKey]||[];c.recipeHistory[oldKey].push({...c.recipes[oldKey],archivedAt:new Date().toISOString()});delete c.recipes[oldKey]}delete c.recipes[n]});
   variants.forEach(([name])=>{
    const key=recipeKey(name),old=c.recipes[key]||c.recipes[name];
-   const recipe={menu:name,menuId:menuKey(name),ingredients:lines.map(x=>({...x})),yieldQty:13,packagingCost:0,extraCost:0,instructions:'Batch 1 ekor ayam dibagi rata menjadi 13 potong: 2 sayap, 2 paha bawah, 4 paha atas, 5 dada. Biaya seluruh bahan dibagi rata ke 13 potong. Minyak 1 liter sementara dihitung habis untuk 1 ekor ayam.',version:(old?.version||0)+1,updatedAt:new Date().toISOString()};
+   const recipe={menu:name,menuId:menuKey(name),ingredients:lines.map(x=>({...x})),yieldQty:13,packagingCost:0,extraCost:0,instructions:'Batch 1 ekor ayam dibagi menjadi 13 potong: 2 sayap, 6 paha (gabungan 2 paha bawah dan 4 paha atas), 5 dada. Semua biaya bahan dibagi rata ke 13 potong. Minyak 1 liter sementara dihitung habis untuk 1 ekor ayam.',version:(old?.version||0)+1,updatedAt:new Date().toISOString()};
    if(old){c.recipeHistory[key]=c.recipeHistory[key]||[];const sig=x=>JSON.stringify({ingredients:x.ingredients,yieldQty:x.yieldQty,packagingCost:x.packagingCost,extraCost:x.extraCost});if(sig(old)!==sig(recipe))c.recipeHistory[key].push({...old,archivedAt:new Date().toISOString()});else recipe.version=old.version||1;}
    c.recipes[key]=recipe;delete c.recipes[name];
   });
   const active=Array.isArray(c.hppMenus)?c.hppMenus.slice():HPP_DEFAULT.slice();
-  const next=active.filter(n=>String(n).toLowerCase()!=="ayam la-ba'sa".toLowerCase());
-  variants.forEach(([name])=>{if(!next.some(n=>String(n).toLowerCase()===name.toLowerCase()))next.push(name)});
+  const removeNames=[...legacyNames,...canonicalNames];
+  const next=active.filter(n=>!removeNames.some(x=>String(n).toLowerCase()===x.toLowerCase()));
+  variants.forEach(([name])=>next.push(name));
   c.hppMenus=next;
  });
  S.stok=stok;
