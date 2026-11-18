@@ -671,19 +671,55 @@ const login=()=>run(async()=>{try{await AU.signInWithEmailAndPassword(Q("#le").v
    Resep memakai satu batch 1 ekor ayam (13 potong), biaya dibagi rata.
    Aman dijalankan berulang dan tidak mengubah riwayat transaksi.
 */
+function ayamNameKey(name){return String(name||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'')}
+function ayamLegacyTarget(name){
+ const n=ayamNameKey(name);
+ if(['sayap','sayaplabasa','sayaplabasa','ayamsayap','sayapayam'].includes(n))return'Sayap';
+ if(['paha','pahalabasa','ayampaha','ayampahaatas','ayampahabawah','pahaatas','pahabawah'].includes(n))return'Paha';
+ if(['dada','dadalabasa','ayamdada','dadaayam'].includes(n))return'Dada';
+ return null;
+}
+async function migrateLegacyAyamSales(){
+ if(!FS||!['owner','admin'].includes(S.role))return;
+ const snap=await FS.collection('sales').get();
+ for(const doc of snap.docs){
+  const raw=doc.data().orders||'[]';let rows;try{rows=JSON.parse(raw)}catch(_){continue}
+  if(!Array.isArray(rows))continue;
+  let changed=false;
+  rows.forEach(order=>{
+   if(Array.isArray(order.i))order.i.forEach(line=>{if(Array.isArray(line)){const target=ayamLegacyTarget(line[0]);if(target&&line[0]!==target){line[0]=target;changed=true}}});
+   if(Array.isArray(order.hppSnapshot))order.hppSnapshot.forEach(line=>{if(line&&typeof line==='object'){const target=ayamLegacyTarget(line.menu);if(target&&line.menu!==target){line.menu=target;line.menuId=menuKey(target);changed=true}}});
+  });
+  if(!changed)continue;
+  await FS.runTransaction(async tx=>{
+   const ref=FS.doc('sales/'+doc.id),fresh=await tx.get(ref);if(!fresh.exists)return;
+   const latest=fresh.data().orders||'[]';let arr;try{arr=JSON.parse(latest)}catch(_){return}if(!Array.isArray(arr))return;
+   let dirty=false;
+   arr.forEach(order=>{
+    if(Array.isArray(order.i))order.i.forEach(line=>{if(Array.isArray(line)){const target=ayamLegacyTarget(line[0]);if(target&&line[0]!==target){line[0]=target;dirty=true}}});
+    if(Array.isArray(order.hppSnapshot))order.hppSnapshot.forEach(line=>{if(line&&typeof line==='object'){const target=ayamLegacyTarget(line.menu);if(target&&line.menu!==target){line.menu=target;line.menuId=menuKey(target);dirty=true}}});
+   });
+   if(dirty)tx.set(ref,{orders:JSON.stringify(arr)},{merge:true});
+  });
+ }
+}
 async function seedAyamLabasa(){
  if(!FS||!['owner','admin'].includes(S.role))return;
  const variants=[['Sayap',15000],['Paha',20000],['Dada',25000]];
  const legacyNames=["Sayap La Ba'sa","Paha La Ba'sa","Dada La Ba'sa",'Ayam Sayap','Ayam Paha Bawah','Ayam Paha Atas','Ayam Dada',"Ayam La-Ba'sa"];
+ const isLegacyMenu=n=>!!ayamLegacyTarget(n)||['ayamlabasa'].includes(ayamNameKey(n));
  const canonicalNames=variants.map(x=>x[0]);
  const menuRef=FS.doc('app/menu');
  const menuData=await FS.runTransaction(async tx=>{
   const snap=await tx.get(menuRef),d=snap.exists?snap.data():{items:'[]',categories:'{}',menuIds:'{}'};
   let items=JSON.parse(d.items||'[]'),cats=JSON.parse(d.categories||'{}'),ids=JSON.parse(d.menuIds||'{}');
-  const isLegacy=n=>legacyNames.some(x=>String(n).toLowerCase()===x.toLowerCase());
-  items=items.filter(x=>!isLegacy(x[0])&&!canonicalNames.some(n=>n.toLowerCase()===String(x[0]).toLowerCase()));
-  legacyNames.forEach(n=>{delete cats[n];delete ids[n]});
-  variants.forEach(([name,price])=>{items.push([name,price]);cats[name]="Lauk La-Ba'sa";ids[name]=ids[name]||menuKey(name)});
+  const isLegacy=n=>isLegacyMenu(n)||legacyNames.some(x=>ayamNameKey(n)===ayamNameKey(x));
+  const oldItems=items.slice();
+  const oldPriceFor=(name,aliases)=>{const names=[name,...aliases];for(const n of names){const hit=oldItems.find(x=>String(x[0]).toLowerCase()===n.toLowerCase());if(hit&&Number.isFinite(+hit[1]))return +hit[1]}return null};
+  items=items.filter(x=>!isLegacy(x[0])&&!canonicalNames.some(n=>ayamNameKey(n)===ayamNameKey(x[0])));
+  Object.keys(cats).forEach(n=>{if(isLegacy(n))delete cats[n]});Object.keys(ids).forEach(n=>{if(isLegacy(n))delete ids[n]});
+  const aliases={Sayap:["Sayap La Ba'sa",'Ayam Sayap'],Paha:["Paha La Ba'sa",'Ayam Paha','Ayam Paha Atas','Ayam Paha Bawah'],Dada:["Dada La Ba'sa",'Ayam Dada']};
+  variants.forEach(([name,defaultPrice])=>{const price=oldPriceFor(name,aliases[name])??defaultPrice;items.push([name,price]);cats[name]="Lauk La-Ba'sa";ids[name]=ids[name]||menuKey(name)});
   tx.set(menuRef,{items:JSON.stringify(items),categories:JSON.stringify(cats),menuIds:JSON.stringify(ids)});
   return{items,cats,ids};
  });
@@ -691,13 +727,15 @@ async function seedAyamLabasa(){
  const ingredients=[
   {key:'ayam_utuh_labasa',name:'Ayam utuh',purchaseUnit:'pcs',baseUnit:'pcs',manualCost:64000},
   {key:'premix_inti_labasa',name:'Bumbu inti premix',purchaseUnit:'kg',baseUnit:'g',manualCost:135},
-  {key:'marinasi_merah_labasa',name:'Bumbu marinasi ayam merah',purchaseUnit:'g',baseUnit:'g',manualCost:447.5},
+  {key:'marinasi_merah_labasa',name:'Bumbu marinasi ayam merah',purchaseUnit:'g',baseUnit:'g',manualCost:89.5},
   {key:'terigu_labasa',name:'Tepung terigu',purchaseUnit:'kg',baseUnit:'kg',manualCost:13000},
   {key:'minyak_goreng_labasa',name:'Minyak goreng',purchaseUnit:'l',baseUnit:'l',manualCost:29000},
   {key:'bubuk_keju_labasa',name:'Bubuk Saus Keju',purchaseUnit:'g',baseUnit:'g',manualCost:0},
   {key:'bubuk_hotlava_labasa',name:'Bubuk Hot Lava',purchaseUnit:'g',baseUnit:'g',manualCost:0},
   {key:'air_labasa',name:'Air',purchaseUnit:'ml',baseUnit:'ml',manualCost:0,zeroCost:true}
  ];
+ const existingStok=S.stok||{};
+ if(existingStok.migrations&&existingStok.migrations.ayam13_v1===true){return;}
  const stok=await updateJsonDoc('stok/cfg','data',{start:'',items:[],ingredients:[],recipes:{},recipeHistory:{},priceHistory:{},hppMenus:[]},c=>{
   c.items=c.items||[];c.ingredients=c.ingredients||[];c.recipes=c.recipes||{};c.recipeHistory=c.recipeHistory||{};c.priceHistory=c.priceHistory||{};
   const ids={};
@@ -735,13 +773,14 @@ async function seedAyamLabasa(){
   const next=active.filter(n=>!removeNames.some(x=>String(n).toLowerCase()===x.toLowerCase()));
   variants.forEach(([name])=>next.push(name));
   c.hppMenus=next;
+  c.migrations=c.migrations||{};c.migrations.ayam13_v1=true;c.migrations.ayam13_v1_at=new Date().toISOString();
  });
  S.stok=stok;
 }
 
 async function boot(){try{FS.doc("users/"+S.u.uid).set({email:S.u.email},{merge:true}).catch(()=>{});const mb=await FS.doc("members/"+S.u.uid).get();S.role=mb.exists&&mb.data().active===true?mb.data().role:"";if(!S.role)throw{message:"Akun ini belum didaftarkan sebagai anggota. Minta pemilik memberi peran di Pengaturan."};const[m,l,k,u,sc,bm]=await Promise.all([FS.doc("app/menu").get(),FS.doc("app/lists").get(),FS.doc("app/kas").get(),FS.doc("users/"+S.u.uid).get(),FS.doc("stok/cfg").get(),FS.doc("app/backupmeta").get()]);S.menu=m.exists?JSON.parse(m.data().items):[];S.menuCats=m.exists?JSON.parse(m.data().categories||"{}"):{};S.menuIds=m.exists?JSON.parse(m.data().menuIds||"{}"):{};if(l.exists){const d=l.data();S.L={bahan:[...d.bahan],pem:[...d.pem],sat:[...d.sat],nama:d.nama?[...d.nama]:NAMA,kat:{...(d.kat||{})}}}if(sc.exists)S.stok=JSON.parse(sc.data().data);if(bm.exists)S.meta={last:bm.data().last,ids:[...(bm.data().ids||[])]};if(k.exists){const d=k.data();S.cfg={start:d.start||"",awal:d.awal||{},fisik:d.fisik||{}}}
  S.name=(u.exists&&u.data().name)||(JAY.includes(S.u.email)?"Jay":S.u.email.split("@")[0].replace(/^\w/,c=>c.toUpperCase()));
- if(["owner","admin"].includes(S.role)){try{await seedAyamLabasa()}catch(seedErr){S.msg="Data HPP ayam belum berhasil disimpan: "+(seedErr.message||seedErr.code||"periksa izin Firebase")}}
+ if(["owner","admin"].includes(S.role)){try{await migrateLegacyAyamSales();await seedAyamLabasa()}catch(seedErr){S.msg="Data HPP ayam belum berhasil disimpan: "+(seedErr.message||seedErr.code||"periksa izin Firebase")}}
  FS.collection("photos").onSnapshot(s=>{s.forEach(d=>S.ph[d.id]=d.data().d);sr()});
  FS.collection("closings").orderBy("date","desc").limit(20).onSnapshot(q=>{S.closings=q.docs.map(d=>({id:d.id,...d.data()}));S.closingErr="";if(S.tab=="w"&&S.seg==0)sr()},e=>{S.closingErr=e.message||"Riwayat closing tidak dapat dimuat.";sr()});
  FS.collection("stockAudits").orderBy("date","desc").limit(200).onSnapshot(q=>{S.stockAudits=q.docs.map(d=>({id:d.id,...d.data()}));if(S.tab=="s")sr()},e=>{S.stockAuditErr=e.message||"Riwayat audit stok tidak dapat dimuat.";sr()});
@@ -970,7 +1009,7 @@ function recipeCurrent(menu){const c=cfgStokRO(),key=recipeKey(menu);return c.re
 function recipeCost(menu,until=loc(),recipeOverride=null){const rec=recipeOverride||recipeCurrent(menu);if(!rec)return{exists:false,complete:false,total:0,lines:[],warnings:['Resep belum dibuat']};
  const lines=(rec.ingredients||[]).map(line=>{const ing=cfgStokRO().ingredients.find(x=>x.id==line.ingredientId);if(!ing)return{...line,name:'Bahan tidak ditemukan',cost:0,complete:false,warning:'Bahan tidak ditemukan'};const q=convertQty(line.qty,line.unit,ing.baseUnit),price=priceAt(ing,until);if(q===null)return{...line,name:ing.name,cost:0,complete:false,warning:'Satuan tidak kompatibel'};return{...line,name:ing.name,baseQty:q,baseUnit:ing.baseUnit,unitCost:price.unitCost,cost:q*price.unitCost,complete:price.complete,priceSource:price.source,warning:price.complete?'':'Harga modal belum tersedia'};});
  const yieldQty=+rec.yieldQty||1,ingredientTotal=lines.reduce((a,x)=>a+x.cost,0),pack=+rec.packagingCost||0,extra=+rec.extraCost||0,total=ingredientTotal+pack+extra,complete=lines.length>0&&lines.every(x=>x.complete)&&yieldQty>0;
- return{exists:true,complete,total,perServing:total/yieldQty,ingredientTotal,packagingCost:pack,extraCost:extra,yieldQty,lines,warnings:[...lines.filter(x=>!x.complete).map(x=>x.name+': '+x.warning),...(yieldQty>0?[]:['Hasil produksi harus lebih dari nol'])]};}
+ return{exists:true,complete,total,perServing:total/yieldQty,ingredientTotal,packagingCost:pack,extraCost:extra,yieldQty,yieldUnit:rec.yieldUnit||'porsi',lines,warnings:[...lines.filter(x=>!x.complete).map(x=>x.name+': '+x.warning),...(yieldQty>0?[]:['Hasil produksi harus lebih dari nol'])]};}
 function resepMenu(nama,sampai=loc()){return recipeCost(nama,sampai).perServing||0}
 function hppMenuStatus(nama,sampai=loc()){const c=recipeCost(nama,sampai);return{rows:c.lines,cost:c.perServing||0,complete:c.complete,...c}}
 function saveIngredientData(mutator,msg){if(!canK()){T('Akun kamu tidak punya izin mengubah ini. Hanya Owner dan Admin.');return}run(async()=>{const c=await updateJsonDoc('stok/cfg','data',{start:'',items:[],ingredients:[],recipes:{},recipeHistory:{},priceHistory:{}},mutator);S.stok=c;await ensR()},msg)}
