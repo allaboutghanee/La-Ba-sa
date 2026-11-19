@@ -214,7 +214,7 @@ const setDate=v=>run(async()=>{if(!v)return;S.date=v;if(!fut())await ensR()});
 function setSeg(i){S.seg=i;S.del="";render()}
 const ordNo=o=>{const l=(S.sales[ym(o.d)]||[]).filter(x=>x.d==o.d);return o.d.slice(8,10)+"/"+o.d.slice(5,7)+"-P"+(l.indexOf(o)+1)};
 function nextSaleNo(d){const rows=(S.sales[ym(d)]||[]).filter(x=>x.d===d),nums=rows.map(x=>{const m=String(x.transactionNo||"").match(/(?:^|-)P(\d+)$/i);return m?Number(m[1]):0});return d.slice(8,10)+"/"+d.slice(5,7)+"-P"+(Math.max(rows.length,...nums,0)+1)};
-function notas(rows){const g=[];let last=null,n=0,ld2="";rows.forEach(r=>{const key=r[0]+"|"+(r[3]||last?.p);if(!last||r[0]!=last.d||(r[3]&&r[3]!=last.p)){if(r[0]!=ld2){n=0;ld2=r[0]}n++;last={d:r[0],p:r[3]||"",no:"N"+String(n).padStart(2,"0"),rows:[]};g.push(last)}last.rows.push(r)});g.forEach(x=>x.t=x.rows.reduce((a,r)=>a+bt(r),0));return g}
+function notas(rows){const g=[];let last=null,n=0,ld2="";rows.forEach(r=>{if(!last||r[0]!=last.d||(r[3]&&r[3]!=last.p)||(r[2]||"")!==(last.u||"")){if(r[0]!=ld2){n=0;ld2=r[0]}n++;last={d:r[0],p:r[3]||"",u:r[2]||"",no:"N"+String(n).padStart(2,"0"),rows:[]};g.push(last)}last.rows.push(r)});g.forEach(x=>x.t=x.rows.reduce((a,r)=>a+bt(r),0));return g}
 function saldo(){const st=S.cfg.start||"0000-00-00",o={};A.forEach((a,i)=>o[a]={aw:+S.cfg.awal[AK[i]]||0,pj:0,pb:0,mi:0,kl:0,fz:S.cfg.fisik[AK[i]]});
  all("sales").filter(x=>x.d>=st).forEach(x=>{const a=x.accountId?A[AK.indexOf(x.accountId)]:JUAL[x.m];if(a&&o[a])o[a].pj+=tot(x)});
  all("buys").filter(r=>r[0]>=st&&r[2]==LB).forEach(r=>{const a=BELI[r[1]];if(a)o[a].pb+=bt(r)});
@@ -537,6 +537,31 @@ const gNota=no=>notas((S.buys[ym(S.date)]||[]).filter(r=>r[0]==S.date)).find(x=>
 function editNota(no){const g=gNota(no);if(!g)return;if(g.rows.some(purchaseStockLocked)){T("Nota sudah menjadi bagian dari saldo stok dan tidak bisa diedit langsung.");return}S.eb={t:"nota",y:ym(S.date),js:g.rows.map(r=>JSON.stringify(r)),d:g.d,m:g.rows[0][1],u:g.rows[0][2],p:g.p};S.mn="";S.msg="";render();scrollTo(0,0)}
 function editRow(k){const y=ym(S.date),r=(S.buys[y]||[])[k];if(!r)return;if(purchaseStockLocked(r)){T("Baris pembelian sudah menjadi bagian dari saldo stok dan tidak bisa diedit langsung.");return}S.eb={t:"row",y,js:[JSON.stringify(r)],d:r[0],m:r[1],u:r[2],p:r[3],b:r[4],q:r[5],s:r[6],h:r[7],c:r[8]||""};S.mn="";S.msg="";render();scrollTo(0,0)}
 function delNota(no){const g=gNota(no);if(!g)return;if(S.del!="dn"+no){S.del="dn"+no;return sr0()}S.del="";S.mn="";const y=ym(S.date),js=g.rows.map(r=>JSON.stringify(r));run(async()=>{await removePurchaseRows(y,js)},"Nota dihapus; stok La-Ba'sa disesuaikan ✓")}
+
+// Koreksi satu kali: pembelian santan 65 ml tanggal 18 Nov 2026 dipisah antara usaha dan pribadi.
+async function migrateSantanSplit20261118(){
+ if(!FS||!['owner','admin'].includes(S.role))return;
+ const y='2026-11',date='2026-11-18',ref=FS.doc('buys/'+y),moveId='santan_split_20261118_v1';
+ await FS.runTransaction(async tx=>{
+  const snap=await tx.get(ref);if(!snap.exists)return;const data=snap.data(),migrations=data.migrations||{};if(migrations.santan_split_20261118_v1)return;
+  const rows=JSON.parse(data.rows||'[]'),matches=rows.filter(r=>r[0]===date&&r[2]===LB&&String(r[3]||'').trim().toLowerCase()==='dewata'&&String(r[4]||'').replace(/\s+/g,'').toLowerCase()==='santan65ml'&&Math.abs((+r[5]||0)-2)<1e-9&&Math.abs((+r[7]||0)-5990)<1);
+  if(matches.length!==1)throw{message:'Koreksi santan otomatis belum dijalankan: baris pembelian yang cocok tidak ditemukan atau ada lebih dari satu. Data tidak diubah.'};
+  const original=matches[0],idx=rows.indexOf(original),personal=[...original];
+  if(original[9]){
+   const item=(S.stok.items||[]).find(x=>String(x.n||'').trim().toLowerCase()==='santan 65ml');
+   if(!item)throw{message:'Item Santan 65ml belum ditemukan di inventaris. Koreksi nota dibatalkan agar stok tidak salah.'};
+   const q=convertQty(1,original[6]||'pcs',item.s);if(q===null||!(q>0))throw{message:'Satuan stok Santan 65ml tidak cocok. Koreksi nota dibatalkan.'};
+   const bal=invRef(invKey(item.n)),move=moveRef(moveId),[bs,ms]=await Promise.all([tx.get(bal),tx.get(move)]);
+   if(ms.exists)throw{message:'Ledger koreksi santan sudah ada tetapi penanda nota belum ditemukan. Perlu pemeriksaan manual; tidak ada perubahan.'};
+   const current=bs.exists?+bs.data().qty:stockBaseQty(item.n);if(current+1e-9<q)throw{message:'Stok Santan 65ml tersisa '+fq(current)+' '+item.s+'. Koreksi otomatis ditahan agar stok tidak minus.'};
+   const next=Math.round((current-q)*1e6)/1e6;tx.set(bal,{item:item.n,unit:item.s,qty:next,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:S.u.uid,lastMoveId:move.id});
+   tx.set(move,{id:move.id,itemId:invKey(item.n),item:item.n,qty:next-current,beforeQty:current,afterQty:next,unit:item.s,type:'purchase_reversal',date,createdAt:firebase.firestore.FieldValue.serverTimestamp(),by:S.u.uid,email:S.u.email,reason:'Koreksi pemisahan 1 pcs Santan 65ml untuk pribadi dari nota Dewata',relatedId:original[9],relatedType:'purchase_correction'});
+  }
+  original[5]=1;personal[2]='Pribadi';personal[5]=1;if(personal.length>9)personal.splice(9,1);rows.splice(idx+1,0,personal);migrations.santan_split_20261118_v1=true;
+  const nj=JSON.stringify(rows);szGuard('buys',y,nj,data.rows||'');tx.set(ref,{rows:nj,migrations},{merge:true});
+ });
+ const fresh=await ref.get();if(fresh.exists)S.buys[y]=JSON.parse(fresh.data().rows||'[]');await refreshInventoryBalances();
+}
 function vEB(){const e=S.eb,row=e.t=="row";return`${hdr(row?"Edit belanja":"Edit nota","S.eb=null;render()")}<div class="card"><label class="f">Tanggal</label><input type="date" id="xd" max="${loc()}" value="${e.d}"><div class="g"><div><label class="f">Metode bayar</label><select id="xm">${sel(["Tunai","Transfer"],e.m)}</select></div><div><label class="f">Untuk</label><select id="xu">${sel([LB,"Pribadi"],e.u)}</select></div></div><label class="f">Nama pemasok</label><input id="xp" list="lp" value="${esc(e.p)}">${dl("lp",S.L.pem)}${row?`<label class="f">Barang / bahan</label><input id="xb" list="lb" value="${esc(e.b)}" autocomplete="off">${dl("lb",S.L.bahan)}<div class="g3"><div><label class="f">Jumlah</label><input id="xq" type="number" inputmode="decimal" value="${e.q}"></div><div><label class="f">Satuan</label><select id="xs"><option value=""></option>${sel([...new Set([...S.L.sat,e.s].filter(Boolean))],e.s)}</select></div><div><label class="f">Harga satuan</label><input id="xh" type="number" inputmode="numeric" value="${e.h}"></div></div><label class="f">Catatan (opsional)</label><input id="xc" value="${esc(e.c)}">`:`<p class="mu sm" style="margin:10px 0 0">Perubahan ini berlaku untuk semua barang di nota. Untuk mengubah barang, jumlah, atau harga, pakai titik tiga di tiap baris.</p>`}</div><button class="pb" onclick="saveEB()">Simpan perubahan</button>`}
 async function repRows(y0,olds,news){const y1=ym(news[0][0]),del=a=>{const pos=a.findIndex(x=>JSON.stringify(x)==olds[0]);if(pos<0)throw{message:"Data sudah berubah, buka ulang."};olds.forEach(j=>{const i=a.findIndex(x=>JSON.stringify(x)==j);if(i<0)throw{message:"Data sudah berubah, buka ulang."};a.splice(i,1)});return pos};
  if(y1==y0)S.buys[y0]=await mut("buys",y0,a=>{const p=del(a);a.splice(p,0,...news)});else{S.buys[y0]=await mut("buys",y0,a=>{del(a)});await ens(y1);S.buys[y1]=await mut("buys",y1,a=>a.push(...news))}}
@@ -851,7 +876,7 @@ async function boot(){try{FS.doc("users/"+S.u.uid).set({email:S.u.email},{merge:
  FS.collection("stockMoves").orderBy("createdAt","desc").limit(500).onSnapshot(q=>{S.stockMoves=q.docs.map(d=>({id:d.id,...d.data()}));if(S.tab=="s")sr()},e=>{S.stockMoveErr=e.message||"Ledger stok tidak dapat dimuat.";sr()});
  FS.collection("inventoryBalances").onSnapshot(q=>{const map={};q.forEach(d=>map[d.id]=d.data());S.inventoryBalances=map;if(S.tab=="m"&&(S.sub=="inv"||S.sub=="stok"))sr()},e=>{S.inventoryBalanceErr=e.message||"Saldo inventaris tidak dapat dimuat.";sr()});
  await refreshInventoryBalances();
- await ensR();resolvePendingDraft();S.ok=true;if(isOwn()&&!(S.meta.last&&ld2(S.meta.last)==loc()))backupNow("otomatis").then(()=>{S.bkErr="";render()}).catch(e=>{S.bkErr=(e&&(e.message||e.code))||"tidak diketahui";render()})}catch(e){S.msg="Gagal memuat data: "+(e.message||e.code)}ld=false;render()}
+ await ensR();if(['owner','admin'].includes(S.role)){try{await migrateSantanSplit20261118()}catch(corrErr){S.msg='Koreksi santan belum diterapkan: '+(corrErr.message||corrErr.code||'periksa data inventaris')}}resolvePendingDraft();S.ok=true;if(isOwn()&&!(S.meta.last&&ld2(S.meta.last)==loc()))backupNow("otomatis").then(()=>{S.bkErr="";render()}).catch(e=>{S.bkErr=(e&&(e.message||e.code))||"tidak diketahui";render()})}catch(e){S.msg="Gagal memuat data: "+(e.message||e.code)}ld=false;render()}
 render();if(HAS)AU.onAuthStateChanged(u=>{S.u=u;S.ok=false;ld=!!u;render();if(u)boot()});
 </script><style id="nav2">
 /* Navigasi: bar mengambang dengan lingkaran penanda yang naik di atas bar */
